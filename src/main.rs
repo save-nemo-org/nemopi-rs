@@ -6,6 +6,29 @@ use sha2::Sha256;
 use std::thread;
 use std::time::Duration;
 
+fn parse_connection_string(connection_string: String) -> (String, String, String) {
+    let mut hostname = None;
+    let mut key = None;
+    let mut device_id = None;
+
+    let parts: Vec<&str> = connection_string.split(';').collect();
+    for p in parts {
+        if p.starts_with("HostName=") {
+            hostname = p.strip_prefix("HostName=");
+        } else if p.starts_with("DeviceId=") {
+            device_id = p.strip_prefix("DeviceId=")
+        } else if p.starts_with("SharedAccessKey=") {
+            key = p.strip_prefix("SharedAccessKey=")
+        }
+    }
+
+    (
+        hostname.unwrap().into(),
+        device_id.unwrap().into(),
+        key.unwrap().into(),
+    )
+}
+
 fn generate_token(decoded_key: &Vec<u8>, message: &str) -> String {
     // Checked base64 and hmac in new so should be safe to unwrap here
     let mut mac = Hmac::<Sha256>::new_from_slice(decoded_key).unwrap();
@@ -15,6 +38,10 @@ fn generate_token(decoded_key: &Vec<u8>, message: &str) -> String {
 
     let pairs = &vec![("sig", signature)];
     serde_urlencoded::to_string(pairs).unwrap()
+}
+
+fn generate_username(hostname: &str, device_id: &str) -> String {
+    format!("{hostname}/{device_id}/?api-version=2021-04-12")
 }
 
 fn generate_shared_access_signature(
@@ -48,19 +75,16 @@ fn generate_shared_access_signature(
 }
 
 fn main() {
-    let hostname = std::env::var("IOTHUB_HOSTNAME")
-        .expect("Set IoT Hub hostname in the IOTHUB_HOSTNAME environment variable");
-    let device_id = std::env::var("DEVICE_ID")
-        .expect("Set the device id in the DEVICE_ID environment variable");
-    let shared_access_key = std::env::var("SHARED_ACCESS_KEY")
-        .expect("Set the device shared access key in the SHARED_ACCESS_KEY environment variable");
+    let connection_string = std::env::var("CONNECTION_STRING")
+        .expect("Set IoT Hub connection string in the CONNECTION_STRING environment variable");
+    let (hostname, device_id, shared_access_key) = parse_connection_string(connection_string);
 
     let mut mqttoptions = MqttOptions::new(&device_id, &hostname, 8883);
     mqttoptions
         .set_transport(Transport::tls_with_default_config())
         .set_keep_alive(Duration::from_secs(5))
         .set_credentials(
-            format!("{hostname}/{device_id}/?api-version=2021-04-12"),
+            generate_username(&hostname, &device_id),
             generate_shared_access_signature(
                 &hostname,
                 &device_id,
