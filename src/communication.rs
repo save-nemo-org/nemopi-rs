@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
+use log::{debug, info};
 use rumqttc::{Client, Connection, MqttOptions, QoS, Transport};
 use sha2::Sha256;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -123,10 +124,10 @@ impl AzureIotHub {
             for (i, notification) in connection_clone.lock().unwrap().iter().enumerate() {
                 match notification {
                     Ok(notif) => {
-                        println!("{i}. Notification = {notif:?}");
+                        debug!("{i}. Notification = {notif:?}");
                     }
                     Err(error) => {
-                        println!("{i}. Notification = {error:?}");
+                        debug!("{i}. Notification = {error:?}");
                         return;
                     }
                 }
@@ -139,7 +140,7 @@ impl AzureIotHub {
             }
         });
         self.connection_thread = Some(connection_thread);
-        println!("IotHub Service Started");
+        info!("IotHub Service Started");
         Ok(())
     }
 
@@ -149,7 +150,7 @@ impl AzureIotHub {
         }
         self.stop_signal.store(true, Ordering::Relaxed);
         self.connection_thread.take().unwrap().join().unwrap();
-        println!("IotHub Service Stopped");
+        info!("IotHub Service Stopped");
         Ok(())
     }
 }
