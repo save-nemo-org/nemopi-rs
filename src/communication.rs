@@ -77,10 +77,11 @@ fn generate_shared_access_signature(
     sas
 }
 
+#[derive(Clone)]
 pub(crate) struct AzureIotHub {
     pub client: Client,
     connection: Arc<Mutex<Connection>>,
-    connection_thread: Option<JoinHandle<()>>,
+    connection_thread: Arc<Mutex<Option<JoinHandle<()>>>>,
     stop_signal: Arc<AtomicBool>,
 }
 
@@ -105,13 +106,24 @@ impl AzureIotHub {
         AzureIotHub {
             client,
             connection: Arc::new(Mutex::new(connection)),
-            connection_thread: None,
+            connection_thread: Arc::new(Mutex::new(None)),
             stop_signal: Arc::new(AtomicBool::new(false)),
         }
     }
 
+    pub fn send_telemetry(&mut self, payload: &str) -> Result<(), Box<dyn std::error::Error>> {
+        self.client.publish(
+            "devices/symmetric-buoy-han/messages/events/",
+            QoS::AtLeastOnce,
+            false,
+            payload.as_bytes(),
+        )?;
+        thread::sleep(Duration::from_millis(1000));
+        Ok(())
+    }
+
     pub fn is_started(&self) -> bool {
-        self.connection_thread.is_some()
+        self.connection_thread.lock().unwrap().is_some()
     }
 
     pub fn start(&mut self) -> Result<(), &'static str> {
@@ -139,7 +151,7 @@ impl AzureIotHub {
                 }
             }
         });
-        self.connection_thread = Some(connection_thread);
+        self.connection_thread = Arc::new(Mutex::new(Some(connection_thread)));
         info!("IotHub Service Started");
         Ok(())
     }
@@ -149,7 +161,13 @@ impl AzureIotHub {
             return Err("");
         }
         self.stop_signal.store(true, Ordering::Relaxed);
-        self.connection_thread.take().unwrap().join().unwrap();
+        self.connection_thread
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap()
+            .join()
+            .unwrap();
         info!("IotHub Service Stopped");
         Ok(())
     }

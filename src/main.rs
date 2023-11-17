@@ -15,22 +15,15 @@ fn main() {
 
     {
         iothub.start().unwrap();
-
-        let mut c: rumqttc::Client = iothub.client.clone();
+        let mut iothub_clone = iothub.clone();
 
         // client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
         thread::spawn(move || loop {
-            c.publish(
-                "devices/symmetric-buoy-han/messages/events/",
-                QoS::AtLeastOnce,
-                false,
-                "foo".as_bytes(),
-            )
-            .unwrap();
+            iothub_clone.send_telemetry("foo").unwrap();
             thread::sleep(Duration::from_millis(1000));
         });
 
-        thread::sleep(Duration::from_secs(10));
+        thread::sleep(Duration::from_secs(100));
         iothub.stop().unwrap();
     }
 }
