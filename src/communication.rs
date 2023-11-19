@@ -116,7 +116,18 @@ impl AzureIotHub {
         }
     }
 
+    pub fn subscribe_device_twin(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        assert!(self.is_started());
+
+        self.client
+            .subscribe("$iothub/twin/res/#", QoS::AtLeastOnce)?;
+
+        Ok(())
+    }
+
     pub fn send_telemetry(&mut self, payload: &str) -> Result<(), Box<dyn std::error::Error>> {
+        assert!(self.is_started());
+
         self.client.publish(
             "devices/symmetric-buoy-han/messages/events/",
             QoS::AtLeastOnce,
@@ -165,6 +176,7 @@ impl AzureIotHub {
         if !self.is_started() {
             return Err("");
         }
+        self.client.disconnect().unwrap();
         self.stop_signal.store(true, Ordering::Relaxed);
         self.connection_thread
             .lock()
@@ -175,5 +187,101 @@ impl AzureIotHub {
             .unwrap();
         info!("IotHub Service Stopped");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_iothub() {
+        let connection_string = std::env::var("CONNECTION_STRING")
+            .expect("Set IoT Hub connection string in the CONNECTION_STRING environment variable");
+
+        let _ = AzureIotHub::new(connection_string);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_create_iothub_panic() {
+        let _ = AzureIotHub::new("invalid_connection_string".to_string());
+    }
+
+    #[test]
+    fn test_start_stop() {
+        let connection_string = std::env::var("CONNECTION_STRING")
+            .expect("Set IoT Hub connection string in the CONNECTION_STRING environment variable");
+
+        let mut iothub = AzureIotHub::new(connection_string);
+
+        assert_eq!(iothub.is_started(), false);
+
+        iothub.start().unwrap();
+
+        assert_eq!(iothub.is_started(), true);
+
+        thread::sleep(Duration::from_secs(2));
+        iothub.stop().unwrap();
+
+        assert_eq!(iothub.is_started(), false);
+    }
+
+    #[test]
+    fn test_is_started() {
+        let connection_string = std::env::var("CONNECTION_STRING")
+            .expect("Set IoT Hub connection string in the CONNECTION_STRING environment variable");
+
+        let mut iothub = AzureIotHub::new(connection_string);
+
+        iothub.start().unwrap();
+        let mut iothub_clone = iothub.clone();
+
+        // Send telemetry in the same thread
+        iothub_clone.send_telemetry("foo").unwrap();
+
+        // Send telemetry from a different thread
+        thread::spawn(move || loop {
+            iothub_clone.send_telemetry("foo").unwrap();
+            thread::sleep(Duration::from_millis(1000));
+        });
+
+        thread::sleep(Duration::from_secs(5));
+        iothub.stop().unwrap();
+    }
+
+    #[test]
+    fn test_send_telemetry() {
+        let connection_string = std::env::var("CONNECTION_STRING")
+            .expect("Set IoT Hub connection string in the CONNECTION_STRING environment variable");
+
+        let mut iothub = AzureIotHub::new(connection_string);
+
+        iothub.start().unwrap();
+
+        // Send telemetry in the same thread
+        iothub.send_telemetry("foo").unwrap();
+
+        // Send telemetry from a different thread
+        let mut iothub_clone = iothub.clone();
+        thread::spawn(move || loop {
+            iothub_clone.send_telemetry("bar").unwrap();
+            thread::sleep(Duration::from_millis(1000));
+        });
+
+        thread::sleep(Duration::from_secs(5));
+        iothub.stop().unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_send_telemetry_panic() {
+        let connection_string = std::env::var("CONNECTION_STRING")
+            .expect("Set IoT Hub connection string in the CONNECTION_STRING environment variable");
+
+        let mut iothub = AzureIotHub::new(connection_string);
+
+        // Send telemetry panics when mqtt client is not running
+        iothub.send_telemetry("foo").unwrap();
     }
 }
