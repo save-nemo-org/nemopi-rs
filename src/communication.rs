@@ -134,7 +134,6 @@ impl AzureIotHub {
             false,
             payload.as_bytes(),
         )?;
-        thread::sleep(Duration::from_millis(1000));
         Ok(())
     }
 
