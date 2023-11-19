@@ -10,6 +10,8 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 fn parse_connection_string(connection_string: String) -> (String, String, String) {
+    debug!("Parsing connection string: {connection_string}");
+
     let mut hostname = None;
     let mut key = None;
     let mut device_id = None;
@@ -19,11 +21,14 @@ fn parse_connection_string(connection_string: String) -> (String, String, String
         if p.starts_with("HostName=") {
             hostname = p.strip_prefix("HostName=");
         } else if p.starts_with("DeviceId=") {
-            device_id = p.strip_prefix("DeviceId=")
+            device_id = p.strip_prefix("DeviceId=");
         } else if p.starts_with("SharedAccessKey=") {
-            key = p.strip_prefix("SharedAccessKey=")
+            key = p.strip_prefix("SharedAccessKey=");
         }
     }
+    debug!("hostname: {hostname:?}");
+    debug!("device_id: {device_id:?}");
+    debug!("shared access key: {key:?}");
 
     (
         hostname.unwrap().into(),
