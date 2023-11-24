@@ -1,7 +1,6 @@
 mod communication;
 
 use crate::communication::AzureIotHub;
-use rumqttc::QoS;
 use std::thread;
 use std::time::Duration;
 
@@ -13,17 +12,17 @@ fn main() {
 
     let mut iothub = AzureIotHub::new(connection_string);
 
-    {
-        iothub.start().unwrap();
-        let mut iothub_clone = iothub.clone();
+    iothub.start().unwrap();
+    thread::sleep(Duration::from_secs(1));
 
-        // client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
-        thread::spawn(move || loop {
-            iothub_clone.send_telemetry("foo").unwrap();
-            thread::sleep(Duration::from_millis(1000));
-        });
+    let mut iothub_clone = iothub.clone();
+    thread::spawn(move || {
+        iothub_clone.get_device_twin().unwrap();
+        thread::sleep(Duration::from_millis(1000));
+        iothub_clone.send_telemetry("foo").unwrap();
+        thread::sleep(Duration::from_millis(1000));
+    });
 
-        thread::sleep(Duration::from_secs(100));
-        iothub.stop().unwrap();
-    }
+    thread::sleep(Duration::from_secs(200));
+    iothub.stop().unwrap();
 }

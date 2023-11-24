@@ -1,8 +1,12 @@
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
-use log::{debug, info};
-use rumqttc::{Client, Connection, MqttOptions, QoS, Transport};
+use log::{debug, info, log};
+use rumqttc::{
+    Client, Connection,
+    Event::{Incoming, Outgoing},
+    MqttOptions, Packet, QoS, Transport,
+};
 use sha2::Sha256;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -96,7 +100,7 @@ impl AzureIotHub {
         let mut mqttoptions = MqttOptions::new(&device_id, &hostname, 8883);
         mqttoptions
             .set_transport(Transport::tls_with_default_config())
-            .set_keep_alive(Duration::from_secs(5))
+            .set_keep_alive(Duration::from_secs(60))
             .set_credentials(
                 generate_username(&hostname, &device_id),
                 generate_shared_access_signature(
@@ -116,45 +120,34 @@ impl AzureIotHub {
         }
     }
 
-    pub fn subscribe_device_twin(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        assert!(self.is_started());
-
-        self.client
-            .subscribe("$iothub/twin/res/#", QoS::AtLeastOnce)?;
-
-        Ok(())
-    }
-
-    pub fn send_telemetry(&mut self, payload: &str) -> Result<(), Box<dyn std::error::Error>> {
-        assert!(self.is_started());
-
-        self.client.publish(
-            "devices/symmetric-buoy-han/messages/events/",
-            QoS::AtLeastOnce,
-            false,
-            payload.as_bytes(),
-        )?;
-        Ok(())
-    }
-
-    pub fn is_started(&self) -> bool {
-        self.connection_thread.lock().unwrap().is_some()
-    }
-
-    pub fn start(&mut self) -> Result<(), &'static str> {
+    pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if self.is_started() {
-            return Err("Failed to connection: the connection has already be established");
+            return Err("Failed to connection: the connection has already be established".into());
         }
         let connection_clone = self.connection.clone();
         let stop_signal_clone = self.stop_signal.clone();
         let connection_thread = thread::spawn(move || {
+            debug!("MQTT service thread started");
             for (i, notification) in connection_clone.lock().unwrap().iter().enumerate() {
                 match notification {
                     Ok(notif) => {
                         debug!("{i}. Notification = {notif:?}");
+                        match notif {
+                            Incoming(pkt) => {
+                                if let Packet::Publish(a) = pkt {
+                                    println!(
+                                        "{:?} {:?} {:?}",
+                                        a.topic,
+                                        a.pkid,
+                                        std::str::from_utf8(&a.payload)
+                                    );
+                                }
+                            }
+                            Outgoing(_pkt) => {}
+                        };
                     }
                     Err(error) => {
-                        debug!("{i}. Notification = {error:?}");
+                        debug!("{i}. Error = {error:?}");
                         return;
                     }
                 }
@@ -167,7 +160,7 @@ impl AzureIotHub {
             }
         });
         self.connection_thread = Arc::new(Mutex::new(Some(connection_thread)));
-        info!("IotHub Service Started");
+        self.subscribe_device_twin()?;
         Ok(())
     }
 
@@ -184,7 +177,47 @@ impl AzureIotHub {
             .unwrap()
             .join()
             .unwrap();
-        info!("IotHub Service Stopped");
+        debug!("MQTT service thread stopped");
+        Ok(())
+    }
+
+    pub fn is_started(&self) -> bool {
+        self.connection_thread.lock().unwrap().is_some()
+    }
+
+    pub fn send_telemetry(&mut self, payload: &str) -> Result<(), Box<dyn std::error::Error>> {
+        assert!(self.is_started());
+
+        self.client.publish(
+            "devices/symmetric-buoy-han/messages/events/",
+            QoS::AtLeastOnce,
+            false,
+            payload.as_bytes(),
+        )?;
+        Ok(())
+    }
+
+    pub fn get_device_twin(&mut self) -> Result<String, Box<dyn std::error::Error>> {
+        self.client.publish(
+            "$iothub/twin/GET/?$rid=0",
+            QoS::AtLeastOnce,
+            false,
+            "{}".as_bytes(),
+        )?;
+        Ok(String::new())
+    }
+
+    fn subscribe_device_twin(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        assert!(self.is_started());
+
+        debug!("Subscribe to device twin response");
+        self.client
+            .subscribe("$iothub/twin/res/#", QoS::AtLeastOnce)?;
+
+        debug!("Subscribe to device twin patch notification");
+        self.client
+            .subscribe("$iothub/twin/PATCH/properties/desired/#", QoS::AtLeastOnce)?;
+
         Ok(())
     }
 }
